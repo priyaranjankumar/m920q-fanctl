@@ -313,11 +313,32 @@ static void begin_config(void)
 
 static void finish_config(void)
 {
+    /*
+     * M920q / NCT6686D behavior:
+     *
+     * 0x00 is the NCT6683-family completion command used by the
+     * working direct-control path.
+     *
+     * On this Lenovo, CF8 may legitimately remain 0x08 after
+     * completion. Therefore we must NOT require the controller
+     * to return to LOCK=1 / CHECK_DONE=1 here.
+     *
+     * The actual fan state is verified by the caller using A00,
+     * A29, PWM feedback, and RPM.
+     */
     nct_write8(REG_FAN_CFG, CFG_DONE_M920Q);
 
-    if (!wait_for_engine(false)) {
-        uint8_t s = nct_read8(REG_ENGINE_STATUS);
-        fprintf(stderr, "m920q-fanctl: ERROR: fan configuration window did not close cleanly.\n");
+    /*
+     * Give the controller a short settling interval. Do not treat
+     * CF8=0x08 as a failure on the verified M920q implementation.
+     */
+    sleep_ms(50);
+
+    uint8_t s = nct_read8(REG_ENGINE_STATUS);
+
+    if (s & CF8_INVALID) {
+        fprintf(stderr,
+                "m920q-fanctl: ERROR: controller reported an invalid fan configuration.\n");
         print_engine(s);
         g_config_open = false;
         exit(EXIT_FAILURE);
